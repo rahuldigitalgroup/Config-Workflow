@@ -98,21 +98,3 @@ jobs:
           echo " SA Option: ${{ github.event.inputs.SAOption }}"
           echo " SST Option: ${{ github.event.inputs.SSTOption }}"
           echo " CFL Number (raw input): ${{ github.event.inputs.CFLNumber }}"
-
-      - name: Validate Float and Add 1.5
-        run: |
-          CFL_NUMBER="${{ github.event.inputs.CFLNumber }}"
-
-          echo " Validating input: $CFL_NUMBER"
-
-          # Validate float format using regex
-          if ! [[ "$CFL_NUMBER" =~ ^[+-]?[0-9]*\.?[0-9]+$ ]]; then
-            echo " ERROR: '$CFL_NUMBER' is not a valid float number."
-            exit 1
-          fi
-
-          echo " Valid float input."
-
-          # Perform float addition using `bc`
-          RESULT=$(echo "$THRESHOLD + 1.5" | bc)
-          echo " Result of $THRESHOLD + 1.5 = $RESULT"
