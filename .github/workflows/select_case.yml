@@ -12,7 +12,7 @@ jobs:
   generate-inputs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Parse config file
         id: parse-config
@@ -30,7 +30,7 @@ jobs:
           echo "INPUT_JSON={\"case_code\":\"${{ inputs.case_code }}\"}" >> $GITHUB_ENV
 
       - name: Upload config options
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: config-options
           path: config_options.json
@@ -39,10 +39,15 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'update_config.yml',
-              ref: 'main',
-              inputs: JSON.parse(process.env.INPUT_JSON)
-            });
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'update_config.yml',
+                ref: 'main',
+                inputs: JSON.parse(process.env.INPUT_JSON)
+              });
+            } catch (error) {
+              core.error(`Failed to trigger workflow: ${error}`);
+              throw error;
+            }
