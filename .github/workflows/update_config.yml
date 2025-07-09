@@ -29,60 +29,68 @@ jobs:
           echo "CONFIG_PATH=${CONFIG_PATH}" >> $GITHUB_ENV
           echo "CONFIG_KEYS=$(cat artifacts/config_options.json)" >> $GITHUB_ENV
 
-      - name: Generate dynamic config form
-        id: generate-form
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const fs = require('fs');
-            const configKeys = JSON.parse(process.env.CONFIG_KEYS);
-            
-            // Create workflow dispatch inputs
-            let inputsYaml = '';
-            configKeys.forEach(key => {
-              inputsYaml += `      ${key}:\n`;
-              inputsYaml += `        description: "Set value for ${key}"\n`;
-              inputsYaml += `        required: false\n`;
-              inputsYaml += `        type: string\n`;
-            });
-            
-            // Create the dynamic workflow content
-            const workflowContent = `name: Dynamic Config Update
-on:
-  workflow_dispatch:
-    inputs:
-      case_code:
-        description: "Validation Case Code"
-        required: true
-        type: string
-${inputsYaml}
-jobs:
-  update-config-file:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Update config file
+      - name: Generate dynamic workflow
+        id: generate-workflow
         run: |
-          CONFIG_PATH="VandV/\\${{ github.event.inputs.case_code }}/config_sa_restart.cfg"
-          cp artifacts/original_config.cfg "\\$CONFIG_PATH"
-${configKeys.map(key => 
-  `          if [ -n "\\${{ github.event.inputs.${key} }}" ]; then\n` +
-  `            sed -i "s/^${key} *=.*/${key}= \\${{ github.event.inputs.${key}}}/" "\\$CONFIG_PATH"\n` +
-  `          fi\n`
-).join('')}
-          
-      - name: Commit changes
-        run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          git add "VandV/\\${{ github.event.inputs.case_code }}/config_sa_restart.cfg"
-          git commit -m "Updated config for \\${{ github.event.inputs.case_code }}"
-          git push
-`;
-            
-            fs.writeFileSync('.github/workflows/dynamic_config.yml', workflowContent);
-            console.log('Generated dynamic workflow file');
+          # Install jq for JSON processing
+          sudo apt-get install -y jq
+
+          # Create basic workflow structure
+          cat > .github/workflows/dynamic_config.yml << 'EOL'
+          name: Dynamic Config Update
+          on:
+            workflow_dispatch:
+              inputs:
+                case_code:
+                  description: "Validation Case Code"
+                  required: true
+                  type: string
+          EOL
+
+          # Add config options as inputs
+          jq -r '.[]' artifacts/config_options.json | while read key; do
+            cat >> .github/workflows/dynamic_config.yml << EOL
+                ${key}:
+                  description: "Set value for ${key}"
+                  required: false
+                  type: string
+          EOL
+          done
+
+          # Add the jobs section
+          cat >> .github/workflows/dynamic_config.yml << 'EOL'
+          jobs:
+            update-config-file:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                
+                - name: Update config file
+                  run: |
+                    CONFIG_PATH="VandV/\${{ github.event.inputs.case_code }}/config_sa_restart.cfg"
+                    cp artifacts/original_config.cfg "\$CONFIG_PATH"
+          EOL
+
+          # Add the config update commands
+          jq -r '.[]' artifacts/config_options.json | while read key; do
+            cat >> .github/workflows/dynamic_config.yml << EOL
+                    if [ -n "\${{ github.event.inputs.${key} }}" ]; then
+                      sed -i "s/^${key} *=.*/${key}= \${{ github.event.inputs.${key}}}/" "\$CONFIG_PATH"
+                    fi
+          EOL
+          done
+
+          # Add the commit step
+          cat >> .github/workflows/dynamic_config.yml << 'EOL'
+                
+                - name: Commit changes
+                  run: |
+                    git config --global user.name "GitHub Actions"
+                    git config --global user.email "actions@github.com"
+                    git add "VandV/\${{ github.event.inputs.case_code }}/config_sa_restart.cfg"
+                    git commit -m "Updated config for \${{ github.event.inputs.case_code }}"
+                    git push
+          EOL
 
       - name: Trigger dynamic workflow
         run: |
