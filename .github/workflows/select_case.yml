@@ -12,15 +12,17 @@ jobs:
   trigger-next:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Set up GitHub CLI
-        uses: cli/cli-action@v2
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gh
 
-      - name: Trigger next workflow
+      - name: Trigger the update_config workflow
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 👈 Fix: Pass token here
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 👈 Required for auth
         run: |
           gh workflow run update_config.yml \
             -f case_code=${{ github.event.inputs.case_code }}
