@@ -11,45 +11,40 @@ on:
 jobs:
   update-config:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: config-data
-          path: artifacts/
-
-      - name: Read config metadata
-        id: read-config
+      - name: Load cached config data
         run: |
-          echo "CASE_CODE=$(cat artifacts/case_code.txt)" >> $GITHUB_ENV
-          echo "CONFIG_PATH=$(cat artifacts/config_path.txt)" >> $GITHUB_ENV
+          CASE_CODE="${{ inputs.case_code }}"
+          CACHE_DIR=".ci/cache/$CASE_CODE"
 
-      - name: Show extracted config keys
+          if [ ! -f "$CACHE_DIR/original_config.cfg" ]; then
+            echo "::error::Cached config not found for $CASE_CODE"
+            exit 1
+          fi
+
+          CONFIG_PATH=$(cat "$CACHE_DIR/config_path.txt")
+          echo "Using original config from: $CONFIG_PATH"
+          cp "$CACHE_DIR/original_config.cfg" "$CONFIG_PATH"
+
+          jq -r '.[]' "$CACHE_DIR/config_options.json" > config_keys.txt
+
+      - name: Update config with placeholders
         run: |
-          echo "Config keys:"
-          cat artifacts/config_options.json | jq -r '.[]'
-
-      - name: Inject placeholder values into config file
-        run: |
-          echo "Updating config file with placeholders..."
-          cp artifacts/original_config.cfg "$CONFIG_PATH"
-
-          jq -r '.[]' artifacts/config_options.json | while read key; do
+          while read key; do
             placeholder="REPLACE_ME_FOR_${key}"
             if grep -q "^$key *=.*" "$CONFIG_PATH"; then
               sed -i "s/^$key *=.*/$key= $placeholder/" "$CONFIG_PATH"
             else
               echo "$key= $placeholder" >> "$CONFIG_PATH"
             fi
-          done
+          done < config_keys.txt
 
-      - name: Commit changes
+      - name: Commit updated config
         run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
           git add "$CONFIG_PATH"
-          git commit -m "Updated config with placeholders for $CASE_CODE"
+          git commit -m "Updated config for ${{ inputs.case_code }}"
           git push
