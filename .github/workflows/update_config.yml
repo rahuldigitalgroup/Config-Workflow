@@ -26,37 +26,40 @@ jobs:
           echo "CONFIG_KEYS=$(cat config_options.json)" >> $GITHUB_OUTPUT
 
       - name: Generate input form
-        uses: myrotvorets/setup-github-forms@1.0.0
-        with:
-          form: |
-            {
-              "title": "Update Configuration Parameters",
-              "description": "Please update the values for the following parameters",
-              "fields": [
-                {
-                  "type": "markdown",
-                  "attributes": {
-                    "value": "### Editing configuration for case: ${{ inputs.case_code }}"
-                  }
-                },
-                ${{ fromJSON(steps.config-options.outputs.CONFIG_KEYS) | map({type: 'input', attributes: {label: ., required: false}}) | join(',') }}
-              ]
-            }
+        run: |
+          # Create a temporary workflow file with dynamic inputs
+          cat <<EOF > dynamic_workflow.yml
+          name: Dynamic Config Update
+          on:
+            workflow_dispatch:
+              inputs:
+                case_code:
+                  default: "${{ inputs.case_code }}"
+                  type: string
+                  required: true
+          $(jq -r '.[] | "                \(.):\n                  description: \"Set value for \(.)\"\n                  required: false\n                  type: string"' config_options.json)
+          EOF
+
+          # Create a new workflow dispatch event
+          gh workflow run dynamic_workflow.yml \
+            --ref main \
+            -f case_code="${{ inputs.case_code }}"
 
       - name: Modify config file
         run: |
           CONFIG_PATH="VandV/${{ inputs.case_code }}/config_sa_restart.cfg"
           TMP_FILE=$(mktemp)
 
+          # Get all inputs except case_code
+          INPUT_KEYS=$(jq -r '.[]' config_options.json)
+
           # Process each line of the config file
           while IFS= read -r line; do
-            # Check if this is a config line (not comment or empty)
             if [[ "$line" =~ ^[^#%].*= ]]; then
               key=$(echo "$line" | awk -F '=' '{print $1}' | sed 's/ *$//')
-              # Check if this key was provided as input
-              if [[ -v "inputs.$key" ]]; then
-                value="${{ inputs[key] }}"
-                if [ -n "$value" ]; then
+              if echo "$INPUT_KEYS" | grep -q "^$key$"; then
+                value=$(jq -r --arg key "$key" '.inputs[$key]' "$GITHUB_EVENT_PATH")
+                if [ "$value" != "null" ] && [ -n "$value" ]; then
                   echo "$key = $value" >> "$TMP_FILE"
                   continue
                 fi
