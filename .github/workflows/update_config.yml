@@ -7,6 +7,10 @@ on:
         description: "Validation Case Code"
         required: true
         type: string
+      artifact_name:
+        description: "Name of the artifact to download"
+        required: true
+        type: string
 
 jobs:
   update-config:
@@ -17,13 +21,14 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: config-data
+          name: ${{ inputs.artifact_name }}
           path: artifacts/
 
-      - name: Read config options
+      - name: Read config data
         id: read-config
         run: |
           echo "CASE_CODE=$(cat artifacts/case_code.txt)" >> $GITHUB_ENV
+          echo "CONFIG_PATH=$(cat artifacts/config_path.txt)" >> $GITHUB_ENV
           echo "CONFIG_KEYS=$(cat artifacts/config_options.json)" >> $GITHUB_ENV
 
       - name: Generate dynamic inputs
@@ -64,3 +69,10 @@ jobs:
       - name: Run dynamic workflow
         run: |
           eval "${{ env.INPUT_CMD }}"
+
+      - name: Clean up artifact
+        if: always()
+        run: |
+          gh api \
+            --method DELETE \
+            "/repos/${{ github.repository }}/actions/artifacts/$(gh api /repos/${{ github.repository }}/actions/artifacts | jq -r ".artifacts[] | select(.name == \"${{ inputs.artifact_name }}\") | .id")"
