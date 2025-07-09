@@ -17,29 +17,30 @@ jobs:
       - name: Parse config file
         id: parse-config
         run: |
-          CONFIG_PATH="VandV/${{ inputs.case_code }}/config_sa_restart.cfg"
+          CONFIG_PATH="VandV/${{ github.event.inputs.case_code }}/config_sa_restart.cfg"
           if [ ! -f "$CONFIG_PATH" ]; then
             echo "::error::Config file not found at $CONFIG_PATH"
             exit 1
           fi
 
-          # Create a JSON object with all config options
-          echo "OPTIONS_JSON=$(grep -E '^[^#%].*=' "$CONFIG_PATH" | jq -R -n '[inputs | select(length>0) | split("=") | {"key": .[0] | gsub("^ +| +$";""), "value": (.[1:] | join("=") | gsub("^ +| +$";""))}]')" >> $GITHUB_ENV
+          # Create a clean list of config keys
+          echo "CONFIG_KEYS=$(grep -E '^[^#%].*=' "$CONFIG_PATH" | awk -F '=' '{print $1}' | sed 's/ *$//' | jq -R -s -c 'split("\n") | map(select(length > 0))')" >> $GITHUB_ENV
 
       - name: Trigger update workflow
         uses: actions/github-script@v6
         with:
           script: |
+            const core = require('@actions/core');
             try {
-              const options = JSON.parse(process.env.OPTIONS_JSON);
+              const configKeys = JSON.parse(process.env.CONFIG_KEYS);
               const inputs = {
-                case_code: '${{ inputs.case_code }}'
+                case_code: '${{ github.event.inputs.case_code }}'
               };
               
               // Add all config options as potential inputs
-              options.forEach(option => {
-                if (option.key && option.key.trim()) {
-                  inputs[option.key.trim()] = '';
+              configKeys.forEach(key => {
+                if (key && key.trim()) {
+                  inputs[key.trim()] = '';
                 }
               });
               
