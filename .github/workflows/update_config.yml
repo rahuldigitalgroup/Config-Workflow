@@ -20,15 +20,19 @@ jobs:
           CONFIG_PATH="VandV/${{ inputs.case_code }}/config_sa_restart.cfg"
           TMP_FILE=$(mktemp)
 
+          # Get the list of all inputs except case_code
+          INPUT_KEYS=$(jq -r '.inputs | keys[]' "$GITHUB_EVENT_PATH" | grep -v 'case_code')
+
           # Process each line of the config file
           while IFS= read -r line; do
             # Check if this is a config line (not comment or empty)
             if [[ "$line" =~ ^[^#%].*= ]]; then
               key=$(echo "$line" | awk -F '=' '{print $1}' | sed 's/ *$//')
               # Check if this key was provided as input
-              if [[ -v "inputs.$key" ]]; then
-                value="${{ fromJSON(format('{{0}}', inputs[key])) }}"
-                if [ -n "$value" ]; then
+              if echo "$INPUT_KEYS" | grep -q "^$key$"; then
+                # Get the input value using jq to properly handle JSON
+                value=$(jq -r --arg key "$key" '.inputs[$key]' "$GITHUB_EVENT_PATH")
+                if [ "$value" != "null" ] && [ -n "$value" ]; then
                   echo "$key = $value" >> "$TMP_FILE"
                   continue
                 fi

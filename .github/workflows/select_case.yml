@@ -24,13 +24,15 @@ jobs:
           fi
 
           # Create a clean list of config keys
-          echo "CONFIG_KEYS=$(grep -E '^[^#%].*=' "$CONFIG_PATH" | awk -F '=' '{print $1}' | sed 's/ *$//' | jq -R -s -c 'split("\n") | map(select(length > 0))')" >> $GITHUB_ENV
+          grep -E '^[^#%].*=' "$CONFIG_PATH" | awk -F '=' '{print $1}' | sed 's/ *$//' > config_keys.txt
+          echo "CONFIG_KEYS=$(jq -R -s -c 'split("\n") | map(select(length > 0))' config_keys.txt)" >> $GITHUB_ENV
 
       - name: Trigger update workflow
         uses: actions/github-script@v6
+        env:
+          CONFIG_KEYS: ${{ env.CONFIG_KEYS }}
         with:
           script: |
-            const core = require('@actions/core');
             try {
               const configKeys = JSON.parse(process.env.CONFIG_KEYS);
               const inputs = {
@@ -52,5 +54,6 @@ jobs:
                 inputs: inputs
               });
             } catch (error) {
-              core.setFailed(`Failed to trigger workflow: ${error.message}`);
+              console.error('Failed to trigger workflow:', error);
+              throw error;
             }
