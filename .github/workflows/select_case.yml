@@ -11,8 +11,6 @@ on:
 jobs:
   generate-inputs:
     runs-on: ubuntu-latest
-    outputs:
-      config_options: ${{ steps.parse-config.outputs.options }}
     steps:
       - uses: actions/checkout@v3
 
@@ -25,34 +23,33 @@ jobs:
             exit 1
           fi
 
-          # Extract all config options
-          options=$(grep -E '^[^#%].*=' "$CONFIG_PATH" | awk -F '=' '{print $1}' | sed 's/ *$//')
-          echo "options=$(echo $options | jq -R -s -c 'split(" ")')" >> $GITHUB_OUTPUT
+          # Create a JSON object with all config options
+          echo "OPTIONS_JSON=$(grep -E '^[^#%].*=' "$CONFIG_PATH" | jq -R -n '[inputs | select(length>0) | split("=") | {"key": .[0] | gsub("^ +| +$";""), "value": (.[1:] | join("=") | gsub("^ +| +$";""))}]')" >> $GITHUB_ENV
 
       - name: Trigger update workflow
         uses: actions/github-script@v6
         with:
           script: |
-            const { case_code } = context.payload.inputs;
-            const options = "${{ steps.parse-config.outputs.options }}".split(',');
-
-            // Create dynamic inputs object
-            const inputs = {
-              case_code: case_code
-            };
-
-            // Add all config options as potential inputs
-            options.forEach(option => {
-              if (option.trim()) {
-                inputs[option.trim()] = '';
-              }
-            });
-
-            // Trigger workflow with all possible inputs
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'update_config.yml',
-              ref: 'main',
-              inputs: inputs
-            });
+            try {
+              const options = JSON.parse(process.env.OPTIONS_JSON);
+              const inputs = {
+                case_code: '${{ inputs.case_code }}'
+              };
+              
+              // Add all config options as potential inputs
+              options.forEach(option => {
+                if (option.key && option.key.trim()) {
+                  inputs[option.key.trim()] = '';
+                }
+              });
+              
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'update_config.yml',
+                ref: 'main',
+                inputs: inputs
+              });
+            } catch (error) {
+              core.setFailed(`Failed to trigger workflow: ${error.message}`);
+            }
