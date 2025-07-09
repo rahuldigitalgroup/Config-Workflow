@@ -7,7 +7,6 @@ on:
         description: "Validation Case Code"
         required: true
         type: string
-      # Other inputs will be dynamically added
 
 jobs:
   update-config:
@@ -15,13 +14,39 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - name: Download config options
+        uses: actions/download-artifact@v3
+        with:
+          name: config-options
+          path: .
+
+      - name: Read config options
+        id: config-options
+        run: |
+          echo "CONFIG_KEYS=$(cat config_options.json)" >> $GITHUB_OUTPUT
+
+      - name: Generate input form
+        uses: myrotvorets/setup-github-forms@1.0.0
+        with:
+          form: |
+            {
+              "title": "Update Configuration Parameters",
+              "description": "Please update the values for the following parameters",
+              "fields": [
+                {
+                  "type": "markdown",
+                  "attributes": {
+                    "value": "### Editing configuration for case: ${{ inputs.case_code }}"
+                  }
+                },
+                ${{ fromJSON(steps.config-options.outputs.CONFIG_KEYS) | map({type: 'input', attributes: {label: ., required: false}}) | join(',') }}
+              ]
+            }
+
       - name: Modify config file
         run: |
           CONFIG_PATH="VandV/${{ inputs.case_code }}/config_sa_restart.cfg"
           TMP_FILE=$(mktemp)
-
-          # Get the list of all inputs except case_code
-          INPUT_KEYS=$(jq -r '.inputs | keys[]' "$GITHUB_EVENT_PATH" | grep -v 'case_code')
 
           # Process each line of the config file
           while IFS= read -r line; do
@@ -29,10 +54,9 @@ jobs:
             if [[ "$line" =~ ^[^#%].*= ]]; then
               key=$(echo "$line" | awk -F '=' '{print $1}' | sed 's/ *$//')
               # Check if this key was provided as input
-              if echo "$INPUT_KEYS" | grep -q "^$key$"; then
-                # Get the input value using jq to properly handle JSON
-                value=$(jq -r --arg key "$key" '.inputs[$key]' "$GITHUB_EVENT_PATH")
-                if [ "$value" != "null" ] && [ -n "$value" ]; then
+              if [[ -v "inputs.$key" ]]; then
+                value="${{ inputs[key] }}"
+                if [ -n "$value" ]; then
                   echo "$key = $value" >> "$TMP_FILE"
                   continue
                 fi

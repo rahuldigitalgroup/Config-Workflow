@@ -17,43 +17,32 @@ jobs:
       - name: Parse config file
         id: parse-config
         run: |
-          CONFIG_PATH="VandV/${{ github.event.inputs.case_code }}/config_sa_restart.cfg"
+          CONFIG_PATH="VandV/${{ inputs.case_code }}/config_sa_restart.cfg"
           if [ ! -f "$CONFIG_PATH" ]; then
             echo "::error::Config file not found at $CONFIG_PATH"
             exit 1
           fi
 
-          # Create a clean list of config keys
-          grep -E '^[^#%].*=' "$CONFIG_PATH" | awk -F '=' '{print $1}' | sed 's/ *$//' > config_keys.txt
-          echo "CONFIG_KEYS=$(jq -R -s -c 'split("\n") | map(select(length > 0))' config_keys.txt)" >> $GITHUB_ENV
+          # Create a JSON file with all config options
+          grep -E '^[^#%].*=' "$CONFIG_PATH" | awk -F '=' '{print $1}' | sed 's/ *$//' | jq -R -s -c 'split("\n") | map(select(length > 0))' > config_options.json
+
+          # Create a minimal workflow dispatch with just the case code
+          echo "INPUT_JSON={\"case_code\":\"${{ inputs.case_code }}\"}" >> $GITHUB_ENV
+
+      - name: Upload config options
+        uses: actions/upload-artifact@v3
+        with:
+          name: config-options
+          path: config_options.json
 
       - name: Trigger update workflow
         uses: actions/github-script@v6
-        env:
-          CONFIG_KEYS: ${{ env.CONFIG_KEYS }}
         with:
           script: |
-            try {
-              const configKeys = JSON.parse(process.env.CONFIG_KEYS);
-              const inputs = {
-                case_code: '${{ github.event.inputs.case_code }}'
-              };
-              
-              // Add all config options as potential inputs
-              configKeys.forEach(key => {
-                if (key && key.trim()) {
-                  inputs[key.trim()] = '';
-                }
-              });
-              
-              await github.rest.actions.createWorkflowDispatch({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                workflow_id: 'update_config.yml',
-                ref: 'main',
-                inputs: inputs
-              });
-            } catch (error) {
-              console.error('Failed to trigger workflow:', error);
-              throw error;
-            }
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'update_config.yml',
+              ref: 'main',
+              inputs: JSON.parse(process.env.INPUT_JSON)
+            });
