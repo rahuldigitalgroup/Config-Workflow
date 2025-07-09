@@ -26,17 +26,18 @@ jobs:
           # Create directory for artifacts
           mkdir -p artifacts
 
-          # Create a JSON file with all config options
+          # Extract all config options (non-comment lines with = sign)
           grep -E '^[^#%].*=' "$CONFIG_PATH" | awk -F '=' '{print $1}' | sed 's/ *$//' | jq -R -s -c 'split("\n") | map(select(length > 0))' > artifacts/config_options.json
 
-          # Also save the case code and config path
+          # Save additional metadata
           echo "${{ inputs.case_code }}" > artifacts/case_code.txt
           echo "$CONFIG_PATH" > artifacts/config_path.txt
+          cp "$CONFIG_PATH" artifacts/original_config.cfg
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: config-data-${{ github.run_id }}
+          name: config-data
           path: artifacts/
           retention-days: 1
 
@@ -51,8 +52,7 @@ jobs:
                 workflow_id: 'update_config.yml',
                 ref: 'main',
                 inputs: {
-                  case_code: '${{ inputs.case_code }}',
-                  artifact_name: 'config-data-${{ github.run_id }}'
+                  case_code: '${{ inputs.case_code }}'
                 }
               });
             } catch (error) {

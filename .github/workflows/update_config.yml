@@ -7,10 +7,6 @@ on:
         description: "Validation Case Code"
         required: true
         type: string
-      artifact_name:
-        description: "Name of the artifact to download"
-        required: true
-        type: string
 
 jobs:
   update-config:
@@ -21,58 +17,73 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.artifact_name }}
+          name: config-data
           path: artifacts/
 
       - name: Read config data
         id: read-config
         run: |
-          echo "CASE_CODE=$(cat artifacts/case_code.txt)" >> $GITHUB_ENV
-          echo "CONFIG_PATH=$(cat artifacts/config_path.txt)" >> $GITHUB_ENV
+          CASE_CODE=$(cat artifacts/case_code.txt)
+          CONFIG_PATH=$(cat artifacts/config_path.txt)
+          echo "CASE_CODE=${CASE_CODE}" >> $GITHUB_ENV
+          echo "CONFIG_PATH=${CONFIG_PATH}" >> $GITHUB_ENV
           echo "CONFIG_KEYS=$(cat artifacts/config_options.json)" >> $GITHUB_ENV
 
-      - name: Generate dynamic inputs
-        id: generate-inputs
+      - name: Generate dynamic config form
+        id: generate-form
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const configKeys = JSON.parse(process.env.CONFIG_KEYS);
+            
+            // Create workflow dispatch inputs
+            let inputsYaml = '';
+            configKeys.forEach(key => {
+              inputsYaml += `      ${key}:\n`;
+              inputsYaml += `        description: "Set value for ${key}"\n`;
+              inputsYaml += `        required: false\n`;
+              inputsYaml += `        type: string\n`;
+            });
+            
+            // Create the dynamic workflow content
+            const workflowContent = `name: Dynamic Config Update
+on:
+  workflow_dispatch:
+    inputs:
+      case_code:
+        description: "Validation Case Code"
+        required: true
+        type: string
+${inputsYaml}
+jobs:
+  update-config-file:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Update config file
         run: |
-          # Install jq if not already installed
-          sudo apt-get -y install jq
-
-          # Generate inputs for GitHub CLI
-          INPUT_ARGS=""
-          while IFS= read -r key; do
-            INPUT_ARGS+=" -f $key=''"
-          done <<< "$(jq -r '.[]' artifacts/config_options.json)"
-
-          # Store the command for later use
-          echo "INPUT_CMD=\"gh workflow run dynamic_config.yml --ref main -f case_code=\\\"${{ env.CASE_CODE }}\\\"$INPUT_ARGS\"" >> $GITHUB_ENV
-
-      - name: Create dynamic workflow
+          CONFIG_PATH="VandV/\\${{ github.event.inputs.case_code }}/config_sa_restart.cfg"
+          cp artifacts/original_config.cfg "\\$CONFIG_PATH"
+${configKeys.map(key => 
+  `          if [ -n "\\${{ github.event.inputs.${key} }}" ]; then\n` +
+  `            sed -i "s/^${key} *=.*/${key}= \\${{ github.event.inputs.${key}}}/" "\\$CONFIG_PATH"\n` +
+  `          fi\n`
+).join('')}
+          
+      - name: Commit changes
         run: |
-          cat <<EOF > .github/workflows/dynamic_config.yml
-          name: Dynamic Config Update
-          on:
-            workflow_dispatch:
-              inputs:
-                case_code:
-                  description: "Validation Case Code"
-                  required: true
-                  type: string
-          $(jq -r '.[] | "                \(.):\n                  description: \"Set value for \(.)\"\n                  required: false\n                  type: string"' artifacts/config_options.json)
-          jobs:
-            update-config:
-              runs-on: ubuntu-latest
-              steps:
-                - uses: actions/checkout@v4
-                - run: echo "Configuration updated for ${{ env.CASE_CODE }}"
-          EOF
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add "VandV/\\${{ github.event.inputs.case_code }}/config_sa_restart.cfg"
+          git commit -m "Updated config for \\${{ github.event.inputs.case_code }}"
+          git push
+`;
+            
+            fs.writeFileSync('.github/workflows/dynamic_config.yml', workflowContent);
+            console.log('Generated dynamic workflow file');
 
-      - name: Run dynamic workflow
+      - name: Trigger dynamic workflow
         run: |
-          eval "${{ env.INPUT_CMD }}"
-
-      - name: Clean up artifact
-        if: always()
-        run: |
-          gh api \
-            --method DELETE \
-            "/repos/${{ github.repository }}/actions/artifacts/$(gh api /repos/${{ github.repository }}/actions/artifacts | jq -r ".artifacts[] | select(.name == \"${{ inputs.artifact_name }}\") | .id")"
+          gh workflow run dynamic_config.yml --ref main -f case_code="${{ env.CASE_CODE }}"
