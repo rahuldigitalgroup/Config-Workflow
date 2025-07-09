@@ -1,0 +1,65 @@
+name: Multi Dropdown + Float Validation Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "Select Environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+      region:
+        description: "Select AWS Region"
+        required: true
+        type: choice
+        options:
+          - us-east-1
+          - eu-west-1
+          - ap-south-1
+
+      service:
+        description: "Select Service"
+        required: true
+        type: choice
+        options:
+          - frontend
+          - backend
+          - worker
+
+      threshold:
+        description: "Enter a float threshold value (e.g., 3.14)"
+        required: true
+        type: string # Freeform input
+
+jobs:
+  process-inputs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print Selected Inputs
+        run: |
+          echo " Environment: ${{ github.event.inputs.env }}"
+          echo " Region: ${{ github.event.inputs.region }}"
+          echo " Service: ${{ github.event.inputs.service }}"
+          echo " Threshold (raw input): ${{ github.event.inputs.threshold }}"
+
+      - name: Validate Float and Add 1.5
+        run: |
+          THRESHOLD="${{ github.event.inputs.threshold }}"
+
+          echo " Validating input: $THRESHOLD"
+
+          # Validate float format using regex
+          if ! [[ "$THRESHOLD" =~ ^[+-]?[0-9]*\.?[0-9]+$ ]]; then
+            echo " ERROR: '$THRESHOLD' is not a valid float number."
+            exit 1
+          fi
+
+          echo " Valid float input."
+
+          # Perform float addition using `bc`
+          RESULT=$(echo "$THRESHOLD + 1.5" | bc)
+          echo " Result of $THRESHOLD + 1.5 = $RESULT"
