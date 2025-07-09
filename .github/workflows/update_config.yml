@@ -14,66 +14,53 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download config options
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: config-options
-          path: .
+          name: config-data
+          path: artifacts/
 
       - name: Read config options
-        id: config-options
+        id: read-config
         run: |
-          echo "CONFIG_KEYS=$(cat config_options.json)" >> $GITHUB_OUTPUT
+          echo "CASE_CODE=$(cat artifacts/case_code.txt)" >> $GITHUB_ENV
+          echo "CONFIG_KEYS=$(cat artifacts/config_options.json)" >> $GITHUB_ENV
 
-      - name: Generate input form
+      - name: Generate dynamic inputs
+        id: generate-inputs
         run: |
-          # Create a temporary workflow file with dynamic inputs
-          cat <<EOF > dynamic_workflow.yml
+          # Install jq if not already installed
+          sudo apt-get -y install jq
+
+          # Generate inputs for GitHub CLI
+          INPUT_ARGS=""
+          while IFS= read -r key; do
+            INPUT_ARGS+=" -f $key=''"
+          done <<< "$(jq -r '.[]' artifacts/config_options.json)"
+
+          # Store the command for later use
+          echo "INPUT_CMD=\"gh workflow run dynamic_config.yml --ref main -f case_code=\\\"${{ env.CASE_CODE }}\\\"$INPUT_ARGS\"" >> $GITHUB_ENV
+
+      - name: Create dynamic workflow
+        run: |
+          cat <<EOF > .github/workflows/dynamic_config.yml
           name: Dynamic Config Update
           on:
             workflow_dispatch:
               inputs:
                 case_code:
-                  default: "${{ inputs.case_code }}"
-                  type: string
+                  description: "Validation Case Code"
                   required: true
-          $(jq -r '.[] | "                \(.):\n                  description: \"Set value for \(.)\"\n                  required: false\n                  type: string"' config_options.json)
+                  type: string
+          $(jq -r '.[] | "                \(.):\n                  description: \"Set value for \(.)\"\n                  required: false\n                  type: string"' artifacts/config_options.json)
+          jobs:
+            update-config:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - run: echo "Configuration updated for ${{ env.CASE_CODE }}"
           EOF
 
-          # Create a new workflow dispatch event
-          gh workflow run dynamic_workflow.yml \
-            --ref main \
-            -f case_code="${{ inputs.case_code }}"
-
-      - name: Modify config file
+      - name: Run dynamic workflow
         run: |
-          CONFIG_PATH="VandV/${{ inputs.case_code }}/config_sa_restart.cfg"
-          TMP_FILE=$(mktemp)
-
-          # Get all inputs except case_code
-          INPUT_KEYS=$(jq -r '.[]' config_options.json)
-
-          # Process each line of the config file
-          while IFS= read -r line; do
-            if [[ "$line" =~ ^[^#%].*= ]]; then
-              key=$(echo "$line" | awk -F '=' '{print $1}' | sed 's/ *$//')
-              if echo "$INPUT_KEYS" | grep -q "^$key$"; then
-                value=$(jq -r --arg key "$key" '.inputs[$key]' "$GITHUB_EVENT_PATH")
-                if [ "$value" != "null" ] && [ -n "$value" ]; then
-                  echo "$key = $value" >> "$TMP_FILE"
-                  continue
-                fi
-              fi
-            fi
-            echo "$line" >> "$TMP_FILE"
-          done < "$CONFIG_PATH"
-
-          mv "$TMP_FILE" "$CONFIG_PATH"
-
-      - name: Commit changes
-        run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          git add "VandV/${{ inputs.case_code }}/config_sa_restart.cfg"
-          git commit -m "Update config for ${{ inputs.case_code }} case"
-          git push
+          eval "${{ env.INPUT_CMD }}"

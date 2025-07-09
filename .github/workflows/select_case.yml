@@ -23,17 +23,21 @@ jobs:
             exit 1
           fi
 
+          # Create directory for artifacts
+          mkdir -p artifacts
+
           # Create a JSON file with all config options
-          grep -E '^[^#%].*=' "$CONFIG_PATH" | awk -F '=' '{print $1}' | sed 's/ *$//' | jq -R -s -c 'split("\n") | map(select(length > 0))' > config_options.json
+          grep -E '^[^#%].*=' "$CONFIG_PATH" | awk -F '=' '{print $1}' | sed 's/ *$//' | jq -R -s -c 'split("\n") | map(select(length > 0))' > artifacts/config_options.json
 
-          # Create a minimal workflow dispatch with just the case code
-          echo "INPUT_JSON={\"case_code\":\"${{ inputs.case_code }}\"}" >> $GITHUB_ENV
+          # Also save the case code
+          echo "${{ inputs.case_code }}" > artifacts/case_code.txt
 
-      - name: Upload config options
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: config-options
-          path: config_options.json
+          name: config-data
+          path: artifacts/
+          retention-days: 1
 
       - name: Trigger update workflow
         uses: actions/github-script@v6
@@ -45,7 +49,9 @@ jobs:
                 repo: context.repo.repo,
                 workflow_id: 'update_config.yml',
                 ref: 'main',
-                inputs: JSON.parse(process.env.INPUT_JSON)
+                inputs: {
+                  case_code: '${{ inputs.case_code }}'
+                }
               });
             } catch (error) {
               core.error(`Failed to trigger workflow: ${error}`);
