@@ -1,12 +1,6 @@
 name: Multi Dropdown + Float Validation Pipeline
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflow.yml"
-      - "src/**"
   workflow_dispatch:
     inputs:
       env:
