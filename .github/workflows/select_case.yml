@@ -9,20 +9,50 @@ on:
         type: string
 
 jobs:
-  trigger-next:
+  generate-inputs:
     runs-on: ubuntu-latest
+    outputs:
+      config_options: ${{ steps.parse-config.outputs.options }}
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Install GitHub CLI
+      - name: Parse config file
+        id: parse-config
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gh
+          CONFIG_PATH="VandV/${{ inputs.case_code }}/config_sa_restart.cfg"
+          if [ ! -f "$CONFIG_PATH" ]; then
+            echo "::error::Config file not found at $CONFIG_PATH"
+            exit 1
+          fi
 
-      - name: Trigger the update_config workflow
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 👈 Required for auth
-        run: |
-          gh workflow run update_config.yml \
-            -f case_code=${{ github.event.inputs.case_code }}
+          # Extract all config options
+          options=$(grep -E '^[^#%].*=' "$CONFIG_PATH" | awk -F '=' '{print $1}' | sed 's/ *$//')
+          echo "options=$(echo $options | jq -R -s -c 'split(" ")')" >> $GITHUB_OUTPUT
+
+      - name: Trigger update workflow
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { case_code } = context.payload.inputs;
+            const options = "${{ steps.parse-config.outputs.options }}".split(',');
+
+            // Create dynamic inputs object
+            const inputs = {
+              case_code: case_code
+            };
+
+            // Add all config options as potential inputs
+            options.forEach(option => {
+              if (option.trim()) {
+                inputs[option.trim()] = '';
+              }
+            });
+
+            // Trigger workflow with all possible inputs
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'update_config.yml',
+              ref: 'main',
+              inputs: inputs
+            });

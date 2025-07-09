@@ -4,50 +4,46 @@ on:
   workflow_dispatch:
     inputs:
       case_code:
-        description: "Validation Case Code (e.g., 2DZP)"
+        description: "Validation Case Code"
         required: true
         type: string
-      # You will dynamically inject inputs like below in a script:
-      # CFL_NUMBER:
-      #   description: "Enter CFL Number"
-      #   required: false
-      #   type: string
 
 jobs:
-  parse-and-update:
+  update-config:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
 
-      - name: Read config and parse options
-        id: parse_config
+      - name: Modify config file
         run: |
-          CONFIG_PATH="VandV/${{ github.event.inputs.case_code }}/config_sa_restart.cfg"
-          echo "Config path: $CONFIG_PATH"
-          echo "options=" >> $GITHUB_OUTPUT
+          CONFIG_PATH="VandV/${{ inputs.case_code }}/config_sa_restart.cfg"
+          TMP_FILE=$(mktemp)
+
+          # Get all inputs that were provided
+          INPUT_KEYS=$(jq -r '.inputs | keys[]' "$GITHUB_EVENT_PATH" | grep -v 'case_code')
+
+          # Process the config file
           while IFS= read -r line; do
-            if [[ $line == *"="* && $line != \#* ]]; then
-              key=$(echo $line | cut -d '=' -f 1 | xargs)
-              echo "::set-output name=${key// /_}::$(echo $line | cut -d '=' -f 2- | xargs)"
+            if [[ "$line" =~ ^[^#%].*= ]]; then
+              key=$(echo "$line" | awk -F '=' '{print $1}' | sed 's/ *$//')
+              # Check if this key was provided as input
+              if echo "$INPUT_KEYS" | grep -q "^$key$"; then
+                value="${{ github.event.inputs[key] }}"
+                if [ -n "$value" ]; then
+                  echo "$key = $value" >> "$TMP_FILE"
+                  continue
+                fi
+              fi
             fi
+            echo "$line" >> "$TMP_FILE"
           done < "$CONFIG_PATH"
 
-      - name: Modify config with new inputs
-        run: |
-          CONFIG_PATH="VandV/${{ github.event.inputs.case_code }}/config_sa_restart.cfg"
-          TMP_FILE=$(mktemp)
-          while IFS= read -r line; do
-            if [[ $line == *"="* && $line != \#* ]]; then
-              key=$(echo $line | cut -d '=' -f 1 | xargs)
-              key_sanitized=${key// /_}
-              input_value="${{ github.event.inputs[$key_sanitized] }}"
-              if [[ ! -z "$input_value" ]]; then
-                echo "$key = $input_value" >> "$TMP_FILE"
-              else
-                echo "$line" >> "$TMP_FILE"
-              fi
-            else
-              echo "$line" >> "$TMP_FILE"
-            fi
-          done < "$CONFIG_PATH"
           mv "$TMP_FILE" "$CONFIG_PATH"
+
+      - name: Commit changes
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add VandV/${{ inputs.case_code }}/config_sa_restart.cfg
+          git commit -m "Update config for ${{ inputs.case_code }}"
+          git push
