@@ -1,0 +1,18 @@
+name: Select Validation Case
+
+on:
+  workflow_dispatch:
+    inputs:
+      case_code:
+        description: "Enter the Validation Case Code (e.g., 2DZP)"
+        required: true
+        type: string
+
+jobs:
+  trigger-next:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger next workflow
+        run: |
+          gh workflow run update_config.yml \
+            -f case_code=${{ github.event.inputs.case_code }}
