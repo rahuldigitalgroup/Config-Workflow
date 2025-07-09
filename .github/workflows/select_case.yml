@@ -23,13 +23,12 @@ jobs:
             exit 1
           fi
 
-          # Create directory for artifacts
           mkdir -p artifacts
 
-          # Extract all config options (non-comment lines with = sign)
+          # Extract config keys into JSON array
           grep -E '^[^#%].*=' "$CONFIG_PATH" | awk -F '=' '{print $1}' | sed 's/ *$//' | jq -R -s -c 'split("\n") | map(select(length > 0))' > artifacts/config_options.json
 
-          # Save additional metadata
+          # Save metadata
           echo "${{ inputs.case_code }}" > artifacts/case_code.txt
           echo "$CONFIG_PATH" > artifacts/config_path.txt
           cp "$CONFIG_PATH" artifacts/original_config.cfg
@@ -56,6 +55,6 @@ jobs:
                 }
               });
             } catch (error) {
-              core.error(`Failed to trigger workflow: ${error}`);
+              core.error(`Failed to trigger update workflow: ${error}`);
               throw error;
             }
