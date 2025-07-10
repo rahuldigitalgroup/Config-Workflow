@@ -86,6 +86,15 @@ jobs:
           # Create updated config from template
           cp su2-main/template_config.cfg "$CONFIG_PATH"
           
+          # Load default parameters from JSON
+          python3 -c "
+import json
+with open('su2-main/config_defaults.json') as f:
+    defaults = json.load(f)
+for key, value in defaults.items():
+    print(f'{key}={value}')
+" > all_params.txt
+          
           # Update main configuration parameters
           if [ -n "${{ inputs.solver }}" ]; then
             sed -i "s/^SOLVER=.*/SOLVER= ${{ inputs.solver }}/" "$CONFIG_PATH"
@@ -106,7 +115,14 @@ jobs:
             sed -i "s/^ITER=.*/ITER= ${{ inputs.iterations }}/" "$CONFIG_PATH"
           fi
           
-          # Process custom config if provided
+          # Apply all default parameters from JSON
+          while IFS='=' read -r key value; do
+            if [ -n "$key" ] && [ -n "$value" ]; then
+              sed -i "s/^$key=.*/$key= $value/" "$CONFIG_PATH"
+            fi
+          done < all_params.txt
+          
+          # Process custom config if provided (overrides defaults)
           if [ -n "${{ inputs.custom_config }}" ]; then
             echo "Processing custom configuration..."
             echo '${{ inputs.custom_config }}' | python3 -c "
