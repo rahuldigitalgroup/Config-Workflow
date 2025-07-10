@@ -65,9 +65,15 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout SU2 Main Repo
+      - name: Checkout Current Repo
         uses: actions/checkout@v4
         with:
+          path: config-repo
+
+      - name: Checkout SU2 Official Repo
+        uses: actions/checkout@v4
+        with:
+          repository: su2code/SU2
           path: su2-main
 
       - name: Setup VandV Structure
@@ -91,10 +97,10 @@ jobs:
           mkdir -p "su2-main/VandV/$CATEGORY/$CASE_CODE"
           
           # Create updated config from template
-          cp su2-main/template_config.cfg "$CONFIG_PATH"
+          cp config-repo/template_config.cfg "$CONFIG_PATH"
           
           # Load default parameters from JSON
-          python3 -c "import json; defaults = json.load(open('su2-main/config_defaults.json')); [print(f'{k}={v}') for k,v in defaults.items()]" > all_params.txt
+          python3 -c "import json; defaults = json.load(open('config-repo/config_defaults.json')); [print(f'{k}={v}') for k,v in defaults.items()]" > all_params.txt
           
           # Update main configuration parameters
           if [ -n "${{ inputs.solver }}" ]; then
@@ -172,13 +178,15 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3 python3-pip
+          sudo apt-get install -y build-essential cmake python3 python3-pip
+          sudo apt-get install -y libopenmpi-dev openmpi-bin
           pip3 install numpy matplotlib pandas
 
-      - name: Mock SU2 Build
+      - name: Build SU2
         run: |
-          echo "Skipping SU2 build - using mock simulation for testing"
-          echo "In production, this would build actual SU2 from source"
+          cd su2-main
+          ./meson.py build --prefix=/usr/local
+          ./ninja -C build install
 
       - name: Mock Simulation
         run: |
