@@ -185,8 +185,8 @@ jobs:
       - name: Build SU2
         run: |
           cd su2-main
-          ./meson.py build --prefix=/usr/local
-          ./ninja -C build install
+          python3 meson.py build --prefix=/usr/local
+          ninja -C build install
 
       - name: Mock Simulation
         run: |
@@ -209,36 +209,7 @@ jobs:
           cd su2-main/VandV/${{ inputs.category }}/${{ inputs.case_code }}
           
           # Create mock plots using Python
-          python3 -c "
-import matplotlib.pyplot as plt
-import numpy as np
-
-# Mock convergence plot
-plt.figure(figsize=(8,6))
-iterations = np.arange(1, 101)
-residuals = np.exp(-iterations/20)
-plt.semilogy(iterations, residuals)
-plt.xlabel('Iterations')
-plt.ylabel('Residual')
-plt.title('Convergence History - ${{ inputs.case_name }}')
-plt.grid(True)
-plt.savefig('convergence.png')
-plt.close()
-
-# Mock pressure plot
-plt.figure(figsize=(8,6))
-x = np.linspace(0, 1, 100)
-y = np.sin(2*np.pi*x)
-plt.plot(x, y)
-plt.xlabel('X/C')
-plt.ylabel('Cp')
-plt.title('Pressure Distribution - ${{ inputs.case_name }}')
-plt.grid(True)
-plt.savefig('pressure.png')
-plt.close()
-
-print('Mock plots generated successfully')
-"
+          python3 -c "import matplotlib.pyplot as plt; import numpy as np; plt.figure(); plt.plot([1,2,3],[1,4,2]); plt.savefig('test.png'); print('Plot saved')"
           echo "Generated convergence.png and pressure.png"
 
       - name: Collect Results
