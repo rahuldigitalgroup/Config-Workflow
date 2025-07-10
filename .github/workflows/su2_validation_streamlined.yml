@@ -87,6 +87,9 @@ jobs:
           CASE_CODE="${{ inputs.case_code }}"
           CONFIG_PATH="su2-main/VandV/$CATEGORY/$CASE_CODE/config.cfg"
           
+          # Create directory structure if it doesn't exist
+          mkdir -p "su2-main/VandV/$CATEGORY/$CASE_CODE"
+          
           # Create updated config from template
           cp su2-main/template_config.cfg "$CONFIG_PATH"
           
