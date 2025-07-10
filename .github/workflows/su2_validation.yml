@@ -1,0 +1,227 @@
+name: SU2 Validation Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      category:
+        description: 'Validation Case Category'
+        required: true
+        type: choice
+        options:
+          - Basic
+          - Extended
+      case_name:
+        description: 'Validation Case Name (e.g., 2D Mixing Layer)'
+        required: true
+        type: string
+      case_code:
+        description: 'Validation Case Code (e.g., 2DML)'
+        required: true
+        type: string
+
+jobs:
+  prepare-config:
+    runs-on: ubuntu-latest
+    outputs:
+      config-options: ${{ steps.parse-config.outputs.config-options }}
+      mesh-count: ${{ steps.count-meshes.outputs.mesh-count }}
+    steps:
+      - name: Checkout SU2 Main Repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          path: su2-main
+
+      - name: Checkout VandV Repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/SU2-VandV
+          path: su2-vandv
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Parse Configuration File
+        id: parse-config
+        run: |
+          CONFIG_PATH="su2-main/VandV/${{ inputs.category }}/${{ inputs.case_code }}/config.cfg"
+          
+          if [ ! -f "$CONFIG_PATH" ]; then
+            echo "::error::Configuration file not found at $CONFIG_PATH"
+            exit 1
+          fi
+          
+          # Extract configuration options (non-commented lines with =)
+          OPTIONS=$(grep -E '^[^#%].*=' "$CONFIG_PATH" | awk -F '=' '{print $1}' | sed 's/[[:space:]]*$//' | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "config-options=$OPTIONS" >> $GITHUB_OUTPUT
+          
+          # Store original config for later use
+          mkdir -p artifacts
+          cp "$CONFIG_PATH" artifacts/original_config.cfg
+
+      - name: Count Mesh Folders
+        id: count-meshes
+        run: |
+          MESH_DIR="su2-main/VandV/${{ inputs.category }}/${{ inputs.case_code }}"
+          MESH_COUNT=$(find "$MESH_DIR" -maxdepth 1 -type d -name "*" | grep -v "^$MESH_DIR$" | wc -l)
+          echo "mesh-count=$MESH_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: config-artifacts
+          path: artifacts/
+
+  collect-user-inputs:
+    needs: prepare-config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate Dynamic Input Form
+        run: |
+          echo "Configuration options found: ${{ needs.prepare-config.outputs.config-options }}"
+          echo "Number of mesh folders: ${{ needs.prepare-config.outputs.mesh-count }}"
+          echo "::notice::Please trigger the 'Update Configuration' workflow with your desired values"
+
+  update-configuration:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.category != ''
+    steps:
+      - name: Checkout SU2 Main Repo
+        uses: actions/checkout@v4
+        with:
+          path: su2-main
+
+      - name: Checkout VandV Repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/SU2-VandV
+          path: su2-vandv
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download Config Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: config-artifacts
+          path: artifacts/
+
+      - name: Copy Files Between Repos
+        run: |
+          CATEGORY="${{ inputs.category }}"
+          CASE_CODE="${{ inputs.case_code }}"
+          
+          # Copy restart and mesh files from VandV repo to main repo
+          VANDV_PATH="su2-vandv/VandV/$CATEGORY/$CASE_CODE"
+          MAIN_PATH="su2-main/VandV/$CATEGORY/$CASE_CODE"
+          
+          if [ ! -d "$VANDV_PATH" ]; then
+            echo "::error::VandV path not found: $VANDV_PATH"
+            exit 1
+          fi
+          
+          # Find all mesh folders and copy files
+          for mesh_folder in "$VANDV_PATH"/*; do
+            if [ -d "$mesh_folder" ]; then
+              folder_name=$(basename "$mesh_folder")
+              target_folder="$MAIN_PATH/$folder_name"
+              
+              if [ -d "$target_folder" ]; then
+                echo "Copying files to $target_folder"
+                
+                # Copy restart file
+                if [ -f "$mesh_folder/restart.dat" ]; then
+                  cp "$mesh_folder/restart.dat" "$target_folder/"
+                fi
+                
+                # Copy mesh file (assuming .su2 extension)
+                find "$mesh_folder" -name "*.su2" -exec cp {} "$target_folder/" \;
+                
+                # Copy modified config to each mesh folder
+                if [ -f "artifacts/original_config.cfg" ]; then
+                  cp "artifacts/original_config.cfg" "$target_folder/config.cfg"
+                fi
+              fi
+            fi
+          done
+
+  build-and-run:
+    needs: update-configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout SU2 Main Repo
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake python3 python3-pip
+          sudo apt-get install -y libopenmpi-dev openmpi-bin
+          pip3 install numpy matplotlib pandas
+
+      - name: Build SU2
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          make -j$(nproc)
+          sudo make install
+
+      - name: Run Automation Script
+        run: |
+          cd VandV/${{ inputs.category }}/${{ inputs.case_code }}
+          python3 ../../Automation.py
+
+      - name: Generate Plots
+        run: |
+          cd VandV/${{ inputs.category }}/${{ inputs.case_code }}
+          python3 Plot.py
+
+      - name: Collect Results
+        run: |
+          mkdir -p results
+          find VandV/${{ inputs.category }}/${{ inputs.case_code }} -name "*.csv" -exec cp {} results/ \;
+          find VandV/${{ inputs.category }}/${{ inputs.case_code }} -name "*.vtu" -exec cp {} results/ \;
+          find VandV/${{ inputs.category }}/${{ inputs.case_code }} -name "*.png" -exec cp {} results/ \;
+          find VandV/${{ inputs.category }}/${{ inputs.case_code }} -name "*.jpg" -exec cp {} results/ \;
+
+      - name: Upload Results as Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: su2-validation-results
+          path: results/
+
+  deploy-results:
+    needs: build-and-run
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Website Repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/SU2-Website
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: website
+
+      - name: Download Results
+        uses: actions/download-artifact@v4
+        with:
+          name: su2-validation-results
+          path: results/
+
+      - name: Create Branch and Deploy
+        run: |
+          cd website
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          # Create new branch with case name
+          BRANCH_NAME="${{ inputs.case_name }}"
+          git checkout -b "$BRANCH_NAME"
+          
+          # Create folder structure
+          mkdir -p "vandv_files/${{ inputs.case_name }}"
+          
+          # Copy plot files to website repo
+          find ../results -name "*.png" -exec cp {} "vandv_files/${{ inputs.case_name }}/" \;
+          find ../results -name "*.jpg" -exec cp {} "vandv_files/${{ inputs.case_name }}/" \;
+          
+          # Commit and push
+          git add .
+          git commit -m "Add validation results for ${{ inputs.case_name }}"
+          git push origin "$BRANCH_NAME"
