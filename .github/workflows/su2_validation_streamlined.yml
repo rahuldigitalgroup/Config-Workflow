@@ -87,13 +87,7 @@ jobs:
           cp su2-main/template_config.cfg "$CONFIG_PATH"
           
           # Load default parameters from JSON
-          python3 -c "
-import json
-with open('su2-main/config_defaults.json') as f:
-    defaults = json.load(f)
-for key, value in defaults.items():
-    print(f'{key}={value}')
-" > all_params.txt
+          python3 -c "import json; defaults = json.load(open('su2-main/config_defaults.json')); [print(f'{k}={v}') for k,v in defaults.items()]" > all_params.txt
           
           # Update main configuration parameters
           if [ -n "${{ inputs.solver }}" ]; then
@@ -125,16 +119,7 @@ for key, value in defaults.items():
           # Process custom config if provided (overrides defaults)
           if [ -n "${{ inputs.custom_config }}" ]; then
             echo "Processing custom configuration..."
-            echo '${{ inputs.custom_config }}' | python3 -c "
-import json
-import sys
-try:
-    config = json.load(sys.stdin)
-    for key, value in config.items():
-        print(f'{key}={value}')
-except:
-    pass
-" > custom_params.txt
+            echo '${{ inputs.custom_config }}' | python3 -c "import json,sys; config=json.load(sys.stdin); [print(f'{k}={v}') for k,v in config.items()]" > custom_params.txt 2>/dev/null || true
             
             while IFS='=' read -r key value; do
               if [ -n "$key" ] && [ -n "$value" ]; then
