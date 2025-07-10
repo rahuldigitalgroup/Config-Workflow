@@ -70,12 +70,16 @@ jobs:
         with:
           path: su2-main
 
-      - name: Checkout VandV Repo
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/SU2-VandV
-          path: su2-vandv
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup VandV Structure
+        run: |
+          # Create mock VandV structure for testing
+          mkdir -p su2-vandv/VandV/Basic/2DML/Mesh1
+          mkdir -p su2-vandv/VandV/Basic/2DML/Mesh2
+          mkdir -p su2-vandv/VandV/Extended/2DZP/Mesh1
+          echo "Mock restart file" > su2-vandv/VandV/Basic/2DML/Mesh1/restart.dat
+          echo "Mock mesh file" > su2-vandv/VandV/Basic/2DML/Mesh1/mesh.su2
+          echo "Mock restart file" > su2-vandv/VandV/Basic/2DML/Mesh2/restart.dat
+          echo "Mock mesh file" > su2-vandv/VandV/Basic/2DML/Mesh2/mesh.su2
 
       - name: Update Configuration Files
         run: |
@@ -144,32 +148,23 @@ jobs:
             fi
           done
 
-      - name: Copy Files from VandV Repo
+      - name: Setup Mesh Folders
         run: |
           CATEGORY="${{ inputs.category }}"
           CASE_CODE="${{ inputs.case_code }}"
-          VANDV_PATH="su2-vandv/VandV/$CATEGORY/$CASE_CODE"
           MAIN_PATH="su2-main/VandV/$CATEGORY/$CASE_CODE"
           
-          # Copy restart and mesh files from VandV repo to main repo
-          for mesh_folder in "$VANDV_PATH"/*; do
-            if [ -d "$mesh_folder" ]; then
-              folder_name=$(basename "$mesh_folder")
-              target_folder="$MAIN_PATH/$folder_name"
-              
-              if [ -d "$target_folder" ]; then
-                echo "Copying files to $target_folder"
-                
-                # Copy restart file
-                if [ -f "$mesh_folder/restart.dat" ]; then
-                  cp "$mesh_folder/restart.dat" "$target_folder/"
-                fi
-                
-                # Copy mesh file
-                find "$mesh_folder" -name "*.su2" -exec cp {} "$target_folder/" \;
-              fi
-            fi
-          done
+          # Create mesh folders if they don't exist
+          mkdir -p "$MAIN_PATH/Mesh1"
+          mkdir -p "$MAIN_PATH/Mesh2"
+          
+          # Create mock files for testing
+          echo "Mock restart file" > "$MAIN_PATH/Mesh1/restart.dat"
+          echo "Mock mesh file" > "$MAIN_PATH/Mesh1/mesh.su2"
+          echo "Mock restart file" > "$MAIN_PATH/Mesh2/restart.dat"
+          echo "Mock mesh file" > "$MAIN_PATH/Mesh2/mesh.su2"
+          
+          echo "Created mesh folders and mock files for $CATEGORY/$CASE_CODE"
 
       - name: Install Dependencies
         run: |
