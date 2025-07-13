@@ -17,11 +17,15 @@ def load_experimental_data():
         # Load actual experimental data
         try:
             data = pd.read_csv(exp_file, delimiter=r'\s+', comment='#')
-            return data
-        except:
-            pass
+            if 'x' in data.columns and 'y' in data.columns:
+                return data
+            else:
+                print(f"Warning: Expected columns 'x' and 'y' in {exp_file}")
+        except Exception as e:
+            print(f"Error loading experimental data: {e}")
     
-    # Generate mock experimental data if file doesn't exist
+    # Generate mock experimental data if file doesn't exist or has issues
+    print("Using mock experimental data")
     x_exp = np.linspace(0, 1, 20)
     y_exp = np.sin(2*np.pi*x_exp) + 0.1*np.random.random(20)
     

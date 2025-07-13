@@ -165,8 +165,17 @@ jobs:
             # Copy single configuration plot folder
             target_dir="vandv_files/${{ inputs.case_code }}/${{ inputs.case_code }}_${{ inputs.turbulence_model }}_${{ inputs.configuration }}"
             rm -rf "$target_dir"
-            if [ -d "../results/plots" ]; then
-              cp -r "../results/plots" "$target_dir"
+            
+            # Find plots directory in results
+            PLOTS_DIR=$(find ../results -name "plots" -type d | head -1)
+            if [ -n "$PLOTS_DIR" ] && [ -d "$PLOTS_DIR" ]; then
+              cp -r "$PLOTS_DIR" "$target_dir"
+              echo "Copied plots from $PLOTS_DIR to $target_dir"
+            else
+              echo "No plots directory found in results"
+              # Create empty target directory to ensure branch creation
+              mkdir -p "$target_dir"
+              echo "No plots available" > "$target_dir/README.txt"
             fi
           fi
           
