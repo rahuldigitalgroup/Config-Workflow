@@ -1,0 +1,233 @@
+name: SU2 Validation Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      category:
+        description: "Validation Case Category (Basic/Extended)"
+        required: true
+        type: choice
+        options:
+          - Basic
+          - Extended
+      case_name:
+        description: "Validation Case Name (e.g., 2D Mixing Layer)"
+        required: true
+        type: string
+      case_code:
+        description: "Validation Case Code (e.g., 2DML)"
+        required: true
+        type: string
+      turbulence_model:
+        description: "Turbulence Model (SA/SST)"
+        required: true
+        type: choice
+        options:
+          - SA
+          - SST
+      configuration:
+        description: "Configuration (Specific Configuration or All)"
+        required: true
+        type: string
+      author_name:
+        description: "Author Name"
+        required: true
+        type: string
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      SU2_MAIN_DIR: ./su2-main
+      VANDV_DIR: ./vandv
+      CATEGORY: ${{ inputs.category }}
+      CASE_CODE: ${{ inputs.case_code }}
+      MODEL: ${{ inputs.turbulence_model }}
+      CONFIG: ${{ inputs.configuration }}
+      AUTHOR: ${{ inputs.author_name }}
+
+    steps:
+      - name: Checkout SU2 Main Repo
+        uses: actions/checkout@v4
+        with:
+          repository: HarshM0210/Config-Workflow
+          path: ${{ env.SU2_MAIN_DIR }}
+
+      - name: Checkout VandV Repo
+        uses: actions/checkout@v4
+        with:
+          repository: HarshM0210/VandV
+          path: ${{ env.VANDV_DIR }}
+
+      - name: Determine Configurations
+        id: configs
+        run: |
+          if [ "$CONFIG" = "All" ]; then
+            # Find all configurations in the specified path
+            config_path="$SU2_MAIN_DIR/ValidationCases/$CATEGORY/$CASE_CODE/$MODEL"
+            configs=$(ls -d $config_path/Configuration* | xargs -n1 basename | tr '\n' ',' | sed 's/,$//')
+            echo "configs=$configs" >> $GITHUB_OUTPUT
+            echo "is_all=true" >> $GITHUB_OUTPUT
+          else
+            echo "configs=$CONFIG" >> $GITHUB_OUTPUT
+            echo "is_all=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            libopenmpi-dev \
+            openmpi-bin \
+            swig \
+            libboost-all-dev \
+            libmetis-dev \
+            libparmetis-dev \
+            libhdf5-dev \
+            zlib1g-dev \
+            python3-dev \
+            python3-pip \
+            git \
+            wget \
+            libgl1
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy matplotlib pyvista pandas
+
+      - name: Clone and Build SU2 (without MPI)
+        run: |
+          git clone https://github.com/su2code/SU2.git
+          cd SU2
+          git checkout -b develop origin/develop
+          python meson.py build \
+            -Dwith-mpi=disabled \
+            -Denable-pywrapper=true \
+            --prefix=/usr/local
+          ninja -C build
+          sudo ninja -C build install
+          sudo ldconfig
+          echo "SU2_CFD path: $(which SU2_CFD)"
+          echo "PATH=/usr/local/bin:$PATH" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+
+      - name: Verify SU2 installation
+        run: |
+          SU2_CFD --help
+
+      - name: Process Configurations
+        working-directory: ${{ env.SU2_MAIN_DIR }}
+        run: |
+          IFS=',' read -ra CONFIGS <<< "${{ steps.configs.outputs.configs }}"
+
+          for config in "${CONFIGS[@]}"; do
+            echo "Processing configuration: $config"
+            
+            # Paths setup
+            MAIN_CONFIG_DIR="ValidationCases/$CATEGORY/$CASE_CODE/$MODEL/$config"
+            VANDV_CONFIG_DIR="$VANDV_DIR/ValidationCases/$CATEGORY/$CASE_CODE/$MODEL/$config"
+            
+            # Copy mesh and restart files
+            for mesh_dir in $MAIN_CONFIG_DIR/*/; do
+              if [ -d "$mesh_dir" ] && [ "$(basename "$mesh_dir")" != "." ] && [ "$(basename "$mesh_dir")" != ".." ]; then
+                mesh_name=$(basename "$mesh_dir")
+                vandv_mesh_dir="$VANDV_CONFIG_DIR/$mesh_name"
+                
+                if [ -d "$vandv_mesh_dir" ]; then
+                  cp "$MAIN_CONFIG_DIR/Config.cfg" "$mesh_dir/"
+                  cp "$vandv_mesh_dir"/* "$mesh_dir/" || echo "No files to copy in $vandv_mesh_dir"
+                fi
+              fi
+            done
+            
+            # Run Automation
+            python3 ValidationCases/Automation.py \
+              --category "$CATEGORY" \
+              --case_code "$CASE_CODE" \
+              --model "$MODEL" \
+              --config "$config"
+            
+            # Cleanup mesh directories
+            for mesh_dir in $MAIN_CONFIG_DIR/*/; do
+              if [ -d "$mesh_dir" ] && [ "$(basename "$mesh_dir")" != "." ] && [ "$(basename "$mesh_dir")" != ".." ]; then
+                find "$mesh_dir" -maxdepth 1 -type f -exec rm -f {} \;
+              fi
+            done
+          done
+
+      - name: Package Results
+        working-directory: ${{ env.SU2_MAIN_DIR }}
+        run: |
+          if [ "${{ steps.configs.outputs.is_all }}" = "true" ]; then
+            artifact_name="${CATEGORY}_${CASE_CODE}_${MODEL}_${AUTHOR}_All"
+            results_dir="ValidationCases/$CATEGORY/$CASE_CODE/$MODEL"
+          else
+            artifact_name="${CATEGORY}_${CASE_CODE}_${MODEL}_${CONFIG}_${AUTHOR}"
+            results_dir="ValidationCases/$CATEGORY/$CASE_CODE/$MODEL/$CONFIG"
+          fi
+
+          # Create results archive
+          mkdir -p "results"
+          find "$results_dir" \( -name "*.csv" -o -name "*.vtu" -o -name "*.png" -o -name "*.dat" -o -name "*.cfg" -o -name "*.su2" \) \
+            -exec cp --parents {} "results/" \;
+
+          # Compress results
+          tar -czvf "${artifact_name}.tar.gz" -C "results" .
+
+      - name: Checkout Results Repo
+        uses: actions/checkout@v4
+        with:
+          repository: HarshM0210/Results
+          path: ./results-repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Branch and Store Plots
+        working-directory: ./results-repo
+        run: |
+          # Configure git
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          # Create branch if it doesn't exist
+          branch_name="${CASE_CODE}_${AUTHOR}"
+          git checkout -b "$branch_name" 2>/dev/null || git checkout "$branch_name"
+          
+          # Create target directory
+          target_dir="vandv_files/$CASE_CODE"
+          mkdir -p "$target_dir"
+          
+          # Copy plots based on configuration
+          if [ "${{ steps.configs.outputs.is_all }}" = "true" ]; then
+            IFS=',' read -ra CONFIGS <<< "${{ steps.configs.outputs.configs }}"
+            for config in "${CONFIGS[@]}"; do
+              plot_folder="${CASE_CODE}_${MODEL}_${config}"
+              if [ -d "$SU2_MAIN_DIR/ValidationCases/$CATEGORY/$CASE_CODE/$MODEL/$config/plots" ]; then
+                cp -r "$SU2_MAIN_DIR/ValidationCases/$CATEGORY/$CASE_CODE/$MODEL/$config/plots" "$target_dir/$plot_folder"
+              fi
+            done
+          else
+            plot_folder="${CASE_CODE}_${MODEL}_${CONFIG}"
+            if [ -d "$SU2_MAIN_DIR/ValidationCases/$CATEGORY/$CASE_CODE/$MODEL/$CONFIG/plots" ]; then
+              cp -r "$SU2_MAIN_DIR/ValidationCases/$CATEGORY/$CASE_CODE/$MODEL/$CONFIG/plots" "$target_dir/$plot_folder"
+            fi
+          fi
+          
+          # Commit and push changes
+          git add .
+          git commit -m "Add validation results for $CASE_CODE by $AUTHOR" || echo "No changes to commit"
+          git push origin "$branch_name"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.CATEGORY }}_${{ env.CASE_CODE }}_${{ env.MODEL }}_${{ env.CONFIG == 'All' && 'All' || env.CONFIG }}_${{ env.AUTHOR }}
+          path: ${{ env.SU2_MAIN_DIR }}/*.tar.gz
