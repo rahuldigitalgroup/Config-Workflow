@@ -139,7 +139,7 @@ jobs:
         if: success()
         run: |
           # Clone results repo
-          git clone https://${{ secrets.GITHUB_TOKEN }}@github.com/HarshM0210/Results.git website
+          git clone https://github.com/HarshM0210/Results.git website
           cd website
           
           git config user.name "GitHub Actions"
